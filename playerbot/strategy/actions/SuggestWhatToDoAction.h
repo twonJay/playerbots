@@ -26,7 +26,6 @@ namespace ai
         std::vector<uint32> GetIncompletedQuests();
 
     private:
-        static std::map<std::string, int> instances;
         static std::map<std::string, int> factions;
         int32 _locale;
     };

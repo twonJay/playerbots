@@ -6,6 +6,8 @@
 
 #define BOT_TEXT(name) sPlayerbotTextMgr.GetBotText(name)
 #define BOT_TEXT2(name, replace) sPlayerbotTextMgr.GetBotText(name, replace)
+// picks with the bot's zone, level and faction taken into account (see my_bot_texts)
+#define BOT_TEXT3(name, replace, bot) sPlayerbotTextMgr.GetBotText(name, replace, bot)
 
 struct BotTextEntry
 {
@@ -15,6 +17,26 @@ struct BotTextEntry
     std::map<int32, std::string> m_text_locales;
     uint32 m_sayType;
     uint32 m_replyType;
+
+    // Restrictions, only set for rows from the local my_bot_texts table. A line
+    // with none of them can be said anywhere by anyone.
+    std::set<uint32> m_zones;               // zone ids the bot must be in
+    uint32 m_minLevel = 0;                  // 0 = no bound
+    uint32 m_maxLevel = 0;
+    uint32 m_team = 0;                      // 0 = any, otherwise ALLIANCE / HORDE
+
+    bool IsZoned() const { return !m_zones.empty(); }
+    bool IsRestricted() const { return IsZoned() || m_minLevel || m_maxLevel || m_team; }
+    bool Matches(uint32 zoneId, uint32 level, uint32 team) const
+    {
+        if (IsZoned() && m_zones.find(zoneId) == m_zones.end())
+            return false;
+        if (m_minLevel && level < m_minLevel)
+            return false;
+        if (m_maxLevel && level > m_maxLevel)
+            return false;
+        return !m_team || m_team == team;
+    }
 };
 
 struct ChatReplyData
@@ -66,6 +88,7 @@ class PlayerbotTextMgr
 
         std::string GetBotText(std::string name, std::map<std::string, std::string> placeholders);
         std::string GetBotText(std::string name);
+        std::string GetBotText(std::string name, std::map<std::string, std::string> placeholders, Player* bot);
         std::string GetBotText(ChatReplyType replyType, std::map<std::string, std::string> placeholders);
         std::string GetBotText(ChatReplyType replyType, std::string name);
         bool GetBotText(std::string name, std::string& text);
