@@ -47,6 +47,11 @@ bool RpgTaxiTrigger::IsActive()
         TaxiPathEntry const* entry = sTaxiPathStore.LookupEntry(i);
         if (entry && entry->from == node && (bot->m_taxi.IsTaximaskNodeKnown(entry->to) || bot->isTaxiCheater()))
         {
+            // mirror RpgTaxiAction: only destinations serving the bot's faction
+            TaxiNodesEntry const* destNode = sTaxiNodesStore.LookupEntry(entry->to);
+            if (!destNode || !destNode->MountCreatureID[bot->GetTeam() == ALLIANCE ? 1 : 0])
+                continue;
+
             return true;
         }
     }
