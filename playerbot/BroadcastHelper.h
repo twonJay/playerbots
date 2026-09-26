@@ -113,6 +113,12 @@ namespace ai
             std::vector<std::string>& allowedInstances,
             Player* bot
         );
+        static bool BroadcastSuggestInstance(
+            PlayerbotAI* ai,
+            std::string const& name,
+            std::string const& shortName,
+            Player* bot
+        );
         static bool BroadcastSuggestQuest(
             PlayerbotAI* ai,
             std::vector<uint32>& quests,

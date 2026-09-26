@@ -9,7 +9,6 @@
 
 using namespace ai;
 
-std::map<std::string, int> SuggestWhatToDoAction::instances;
 std::map<std::string, int> SuggestWhatToDoAction::factions;
 
 SuggestWhatToDoAction::SuggestWhatToDoAction(PlayerbotAI* ai, std::string name)
@@ -30,6 +29,92 @@ SuggestWhatToDoAction::SuggestWhatToDoAction(PlayerbotAI* ai, std::string name)
     suggestions.push_back(&SuggestWhatToDoAction::thunderfury);
 }
 
+namespace
+{
+    // Vanilla dungeons and raids with the level band players ran them at, the
+    // zone(s) the entrance sits in and the faction that could realistically get
+    // there (0 = both). Level bands are the usual 1.12 recommendations.
+    struct DungeonInfo
+    {
+        char const* name;
+        char const* shortName;
+        uint32 minLevel;
+        uint32 maxLevel;
+        uint32 team;
+        std::vector<uint32> zones;
+    };
+
+    const std::vector<DungeonInfo> Dungeons =
+    {
+        { "Ragefire Chasm",              "RFC",      13, 18, HORDE,    { 1637 } },
+        { "Wailing Caverns",             "WC",       17, 24, 0,        { 17 } },
+        { "The Deadmines",               "Deadmines",17, 26, ALLIANCE, { 40 } },
+        { "Shadowfang Keep",             "SFK",      22, 30, 0,        { 130 } },
+        { "Blackfathom Deeps",           "BFD",      24, 32, 0,        { 331 } },
+        { "The Stockade",                "Stockades",24, 32, ALLIANCE, { 1519 } },
+        { "Gnomeregan",                  "Gnomer",   29, 38, ALLIANCE, { 1 } },
+        { "Razorfen Kraul",              "RFK",      29, 38, 0,        { 17 } },
+        { "Scarlet Monastery Graveyard", "SM GY",    30, 37, 0,        { 85 } },
+        { "Scarlet Monastery Library",   "SM Lib",   33, 40, 0,        { 85 } },
+        { "Scarlet Monastery Armory",    "SM Arm",   36, 42, 0,        { 85 } },
+        { "Scarlet Monastery Cathedral", "SM Cath",  38, 45, 0,        { 85 } },
+        { "Razorfen Downs",              "RFD",      37, 46, 0,        { 17, 400 } },
+        { "Uldaman",                     "Uldaman",  41, 51, 0,        { 3 } },
+        { "Zul'Farrak",                  "ZF",       44, 54, 0,        { 440 } },
+        { "Maraudon",                    "Mara",     46, 55, 0,        { 405 } },
+        { "the Sunken Temple",           "ST",       50, 60, 0,        { 8 } },
+        { "Blackrock Depths",            "BRD",      52, 60, 0,        { 25, 51, 46 } },
+        { "Lower Blackrock Spire",       "LBRS",     55, 60, 0,        { 25, 51, 46 } },
+        { "Upper Blackrock Spire",       "UBRS",     58, 60, 0,        { 25, 51, 46 } },
+        { "Dire Maul East",              "DM East",  55, 60, 0,        { 357 } },
+        { "Dire Maul West",              "DM West",  57, 60, 0,        { 357 } },
+        { "Dire Maul North",             "DM North", 57, 60, 0,        { 357 } },
+        { "Scholomance",                 "Scholo",   58, 60, 0,        { 28 } },
+        { "Stratholme",                  "Strat",    58, 60, 0,        { 139 } },
+        { "Molten Core",                 "MC",       60, 60, 0,        { 25, 51, 46 } },
+        { "Onyxia's Lair",               "Ony",      60, 60, 0,        { 15 } },
+        { "Zul'Gurub",                   "ZG",       60, 60, 0,        { 33 } },
+        { "Blackwing Lair",              "BWL",      60, 60, 0,        { 25, 51, 46 } },
+    };
+
+    bool IsHomeCapital(uint32 zoneId, uint32 team)
+    {
+        switch (zoneId)
+        {
+            case 1519: case 1537: case 1657: return team == ALLIANCE;   // Stormwind, Ironforge, Darnassus
+            case 1637: case 1638: case 1497: return team == HORDE;      // Orgrimmar, Thunder Bluff, Undercity
+            default: return false;
+        }
+    }
+
+    // local: level-appropriate dungeons whose entrance is in the bot's zone
+    // reachable: every level-appropriate dungeon the bot's faction would run
+    void CollectDungeons(Player* bot, std::vector<DungeonInfo const*>& local, std::vector<DungeonInfo const*>& reachable)
+    {
+        uint32 const zoneId = bot->GetZoneId();
+        uint32 const level = bot->GetLevel();
+        uint32 const team = bot->GetTeam();
+
+        for (DungeonInfo const& dungeon : Dungeons)
+        {
+            if (level < dungeon.minLevel || level > dungeon.maxLevel)
+                continue;
+            if (dungeon.team && dungeon.team != team)
+                continue;
+
+            reachable.push_back(&dungeon);
+            if (std::find(dungeon.zones.begin(), dungeon.zones.end(), zoneId) != dungeon.zones.end())
+                local.push_back(&dungeon);
+        }
+    }
+
+    // Groups form in the capitals and at the dungeon's doorstep; out in the world
+    // people are busy questing and rarely ask.
+    const uint32 LFG_ELSEWHERE_CHANCE = 10;
+    // At a hub, this share of suggestions is LFG talk instead of a random pick.
+    const uint32 LFG_HUB_CHANCE = 40;
+}
+
 bool SuggestWhatToDoAction::isUseful()
 {
     if (!sRandomPlayerbotMgr.IsRandomBot(bot) || bot->GetGroup() || bot->GetInstanceId())
@@ -42,8 +127,17 @@ bool SuggestWhatToDoAction::isUseful()
 
 bool SuggestWhatToDoAction::Execute(Event& event)
 {
-    int index = rand() % suggestions.size();
-    (this->*suggestions[index])();
+    std::vector<DungeonInfo const*> local, reachable;
+    CollectDungeons(bot, local, reachable);
+    bool const atGroupHub = !local.empty() || (!reachable.empty() && IsHomeCapital(bot->GetZoneId(), bot->GetTeam()));
+
+    if (atGroupHub && urand(1, 100) <= LFG_HUB_CHANCE)
+        instance();
+    else
+    {
+        int index = rand() % suggestions.size();
+        (this->*suggestions[index])();
+    }
 
     std::string qualifier = "suggest what to do";
     time_t lastSaid = AI_VALUE2(time_t, "last said", qualifier);
@@ -54,61 +148,22 @@ bool SuggestWhatToDoAction::Execute(Event& event)
 
 void SuggestWhatToDoAction::instance()
 {
-    if (instances.empty())
-    {
-        instances["Ragefire Chasm"] = 15;
-        instances["Deadmines"] = 18;
-        instances["Wailing Caverns"] = 18;
-        instances["Shadowfang Keep"] = 25;
-        instances["Blackfathom Deeps"] = 20;
-        instances["Stockade"] = 20;
-        instances["Gnomeregan"] = 35;
-        instances["Razorfen Kraul"] = 35;
-        instances["Maraudon"] = 50;
-        instances["Scarlet Monastery"] = 40;
-        instances["Uldaman"] = 45;
-        instances["Dire Maul"] = 58;
-        instances["Scholomance"] = 59;
-        instances["Razorfen Downs"] = 40;
-        instances["Stratholme"] = 59;
-        instances["Zul'Farrak"] = 45;
-        instances["Blackrock Depths"] = 55;
-        instances["Temple of Atal'Hakkar"] = 55;
-        instances["Lower Blackrock Spire"] = 57;
+    std::vector<DungeonInfo const*> local, reachable;
+    CollectDungeons(bot, local, reachable);
 
-        instances["Hellfire Citadel"] = 65;
-        instances["Coilfang Reservoir"] = 65;
-        instances["Auchindoun"] = 65;
-        instances["Cavens of Time"] = 68;
-        instances["Tempest Keep"] = 69;
-        instances["Magister's Terrace"] = 70;
+    std::vector<DungeonInfo const*> const* pool = nullptr;
+    if (!local.empty())
+        pool = &local;
+    else if (IsHomeCapital(bot->GetZoneId(), bot->GetTeam()))
+        pool = &reachable;
+    else if (urand(1, 100) <= LFG_ELSEWHERE_CHANCE)
+        pool = &reachable;
 
-        instances["Utgarde Keep"] = 75;
-        instances["The Nexus"] = 75;
-        instances["Ahn'kahet: The Old Kingdom"] = 75;
-        instances["Azjol-Nerub"] = 75;
-        instances["Drak'Tharon Keep"] = 75;
-        instances["Violet Hold"] = 80;
-        instances["Gundrak"] = 77;
-        instances["Halls of Stone"] = 77;
-        instances["Halls of Lightning"] = 77;
-        instances["Oculus"] = 77;
-        instances["Utgarde Pinnacle"] = 77;
-        instances["Trial of the Champion"] = 80;
-        instances["Forge of Souls"] = 80;
-        instances["Pit of Saron"] = 80;
-        instances["Halls of Reflection"] = 80;
-    }
+    if (!pool || pool->empty())
+        return;
 
-    std::vector<std::string> allowedInstances;
-    for (std::map<std::string, int>::iterator i = instances.begin(); i != instances.end(); ++i)
-    {
-        if ((int)bot->GetLevel() >= i->second) allowedInstances.push_back(i->first);
-    }
-
-    if (allowedInstances.empty()) return;
-
-    BroadcastHelper::BroadcastSuggestInstance(ai, allowedInstances, bot);
+    DungeonInfo const* dungeon = (*pool)[urand(0, pool->size() - 1)];
+    BroadcastHelper::BroadcastSuggestInstance(ai, dungeon->name, dungeon->shortName, bot);
 }
 
 std::vector<uint32> SuggestWhatToDoAction::GetIncompletedQuests()
@@ -332,4 +387,4 @@ bool SuggestTradeAction::Execute(Event& event)
     BroadcastHelper::BroadcastSuggestSell(ai, proto, count, price, bot);
 
     return true;
-}
+}

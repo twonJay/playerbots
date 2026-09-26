@@ -60,6 +60,39 @@ void PlayerbotTextMgr::LoadBotTexts()
         } while (results->NextRow());
     }
     sLog.outBasic("%d playerbot texts loaded", count);
+
+    // Local chatter kept apart from ai_playerbot_texts, which the playerbots SQL
+    // drops and recreates on update. Rows here can be tied to zones, a level band
+    // and a faction; see my-content/world/0007_bot_chatter.sql.
+    int localCount = 0;
+    auto localResults = WorldDatabase.PQuery("SELECT `name`, `text`, `zones`, `min_level`, `max_level`, `team` FROM `my_bot_texts`");
+    if (localResults)
+    {
+        do
+        {
+            Field* fields = localResults->Fetch();
+            BotTextEntry entry(fields[0].GetCppString(), fields[1].GetCppString(), std::map<int32, std::string>(), 0, 0);
+
+            std::stringstream zones(fields[2].GetCppString());
+            std::string zone;
+            while (std::getline(zones, zone, ','))
+                if (uint32 zoneId = std::strtoul(zone.c_str(), nullptr, 10))
+                    entry.m_zones.insert(zoneId);
+
+            entry.m_minLevel = fields[3].GetUInt32();
+            entry.m_maxLevel = fields[4].GetUInt32();
+            switch (fields[5].GetUInt32())
+            {
+                case 1: entry.m_team = ALLIANCE; break;
+                case 2: entry.m_team = HORDE; break;
+                default: break;
+            }
+
+            botTexts[entry.m_name].push_back(entry);
+            ++localCount;
+        } while (localResults->NextRow());
+    }
+    sLog.outBasic("%d local playerbot texts loaded", localCount);
 }
 
 void PlayerbotTextMgr::LoadBotTextChance()
@@ -96,8 +129,15 @@ std::string PlayerbotTextMgr::GetBotText(std::string name)
         return "";
     }
 
-    std::vector<BotTextEntry>& list = botTexts[name];
-    BotTextEntry textEntry = list[urand(0, list.size() - 1)];
+    std::vector<BotTextEntry const*> list;
+    for (BotTextEntry const& entry : botTexts[name])
+        if (!entry.IsRestricted())
+            list.push_back(&entry);
+
+    if (list.empty())
+        return "";
+
+    BotTextEntry textEntry = *list[urand(0, list.size() - 1)];
     int32 localePrio = GetLocalePriority();
     if (localePrio == -1)
         return textEntry.m_text;
@@ -118,6 +158,51 @@ std::string PlayerbotTextMgr::GetBotText(std::string name, std::map<std::string,
 
     ReplacePlaceholders(botText, placeholders);
 
+    return botText;
+}
+
+// Share of picks that go to lines tied to the bot's current zone whenever any
+// qualify, so a handful of zone lines is not drowned out by hundreds of generic ones.
+static const uint32 ZONED_TEXT_CHANCE = 50;
+
+std::string PlayerbotTextMgr::GetBotText(std::string name, std::map<std::string, std::string> placeholders, Player* bot)
+{
+    if (!bot)
+        return GetBotText(name, placeholders);
+
+    auto itr = botTexts.find(name);
+    if (itr == botTexts.end())
+        return "";
+
+    uint32 const zoneId = bot->GetZoneId();
+    uint32 const level = bot->GetLevel();
+    uint32 const team = bot->GetTeam();
+
+    std::vector<BotTextEntry const*> zoned, general;
+    for (BotTextEntry const& entry : itr->second)
+    {
+        if (!entry.Matches(zoneId, level, team))
+            continue;
+        (entry.IsZoned() ? zoned : general).push_back(&entry);
+    }
+
+    std::vector<BotTextEntry const*>* pool = &general;
+    if (!zoned.empty() && (general.empty() || urand(1, 100) <= ZONED_TEXT_CHANCE))
+        pool = &zoned;
+    if (pool->empty())
+        return "";
+
+    BotTextEntry const* textEntry = (*pool)[urand(0, pool->size() - 1)];
+    std::string botText = textEntry->m_text;
+    int32 localePrio = GetLocalePriority();
+    if (localePrio != -1)
+    {
+        auto loc = textEntry->m_text_locales.find(localePrio);
+        if (loc != textEntry->m_text_locales.end() && !loc->second.empty())
+            botText = loc->second;
+    }
+
+    ReplacePlaceholders(botText, placeholders);
     return botText;
 }
 
@@ -240,4 +325,4 @@ void PlayerbotTextMgr::ResetLocalePriority()
     {
         botTextLocalePriority[sObjectMgr.GetStorageLocaleIndexFor(LocaleConstant(i))] = 0;
     }
-}
+}

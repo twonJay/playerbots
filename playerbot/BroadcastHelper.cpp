@@ -803,6 +803,7 @@ bool BroadcastHelper::BroadcastSuggestInstance(
         //itemout << "|c00b000b0" << allowedInstances[urand(0, allowedInstances.size() - 1)] << "|r";
         itemout << allowedInstances[urand(0, allowedInstances.size() - 1)];
         placeholders["%instance_name"] = itemout.str();
+        placeholders["%instance_short"] = itemout.str();
 
         placeholders["%my_class"] = ai->GetChatHelper()->formatClass(bot->getClass());
         placeholders["%my_race"] = ai->GetChatHelper()->formatRace(bot->getRace());
@@ -811,6 +812,35 @@ bool BroadcastHelper::BroadcastSuggestInstance(
         return BroadcastToChannelWithGlobalChance(
             ai,
             BOT_TEXT2("suggest_instance", placeholders),
+            { {TO_SAY_CITY, 50}, {TO_YELL_CITY, 10}, {TO_LOOKING_FOR_GROUP, 50}, {TO_GUILD, 50}, {TO_WORLD, 50}, {TO_GENERAL, 100} }
+        );
+    }
+
+    return false;
+}
+
+// One dungeon already chosen by the caller for this bot's level, faction and
+// whereabouts; shortName is what players type in chat (SM Cath, BRD, ZF...).
+bool BroadcastHelper::BroadcastSuggestInstance(
+    PlayerbotAI* ai,
+    std::string const& name,
+    std::string const& shortName,
+    Player* bot
+)
+{
+    if (urand(1, sPlayerbotAIConfig.broadcastChanceMaxValue) <= sPlayerbotAIConfig.broadcastChanceSuggestInstance)
+    {
+        std::map<std::string, std::string> placeholders;
+        placeholders["%my_role"] = ai->GetChatHelper()->formatClass(bot, AiFactory::GetPlayerSpecTab(bot));
+        placeholders["%instance_name"] = name;
+        placeholders["%instance_short"] = shortName;
+        placeholders["%my_class"] = ai->GetChatHelper()->formatClass(bot->getClass());
+        placeholders["%my_race"] = ai->GetChatHelper()->formatRace(bot->getRace());
+        placeholders["%my_level"] = std::to_string(bot->GetLevel());
+
+        return BroadcastToChannelWithGlobalChance(
+            ai,
+            BOT_TEXT3("suggest_instance", placeholders, bot),
             { {TO_SAY_CITY, 50}, {TO_YELL_CITY, 10}, {TO_LOOKING_FOR_GROUP, 50}, {TO_GUILD, 50}, {TO_WORLD, 50}, {TO_GENERAL, 100} }
         );
     }
@@ -962,7 +992,7 @@ bool BroadcastHelper::BroadcastSuggestSomething(
 
         return BroadcastToChannelWithGlobalChance(
             ai,
-            BOT_TEXT2("suggest_something", placeholders),
+            BOT_TEXT3("suggest_something", placeholders, bot),
             { {TO_SAY, 70}, {TO_YELL, 10},{TO_GUILD, 10}, {TO_WORLD, 70}, {TO_GENERAL, 100} }
         );
     }
@@ -995,7 +1025,7 @@ bool BroadcastHelper::BroadcastSuggestSomethingToxic(
 
         return BroadcastToChannelWithGlobalChance(
             ai,
-            BOT_TEXT2("suggest_something_toxic", placeholders),
+            BOT_TEXT3("suggest_something_toxic", placeholders, bot),
             { {TO_SAY, 70}, {TO_YELL, 10},{TO_GUILD, 10}, {TO_WORLD, 70}, {TO_GENERAL, 100} }
         );
     }
