@@ -172,6 +172,13 @@ bool RpgTaxiAction::Execute(Event& event)
         TaxiPathEntry const* entry = sTaxiPathStore.LookupEntry(i);
         if (entry && entry->from == node && (bot->m_taxi.IsTaximaskNodeKnown(entry->to) || bot->isTaxiCheater()))
         {
+            // the destination must serve the bot's faction (a neutral node has
+            // both mounts set) - else a horde bot at neutral Ratchet can fly
+            // into alliance-only Theramore
+            TaxiNodesEntry const* destNode = sTaxiNodesStore.LookupEntry(entry->to);
+            if (!destNode || !destNode->MountCreatureID[bot->GetTeam() == ALLIANCE ? 1 : 0])
+                continue;
+
             nodes.push_back(i);
         }
     }
