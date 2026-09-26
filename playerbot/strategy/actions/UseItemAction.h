@@ -186,7 +186,18 @@ namespace ai
     public:
         UseHealthstoneAction(PlayerbotAI* ai) : UseItemIdAction(ai, "healthstone") {}
 
-        bool isUseful() override { return UseItemIdAction::isUseful() && AI_VALUE2(bool, "combat", "self target"); }
+        bool isUseful() override
+        {
+            if (!UseItemIdAction::isUseful() || !AI_VALUE2(bool, "combat", "self target"))
+                return false;
+
+            // Bots below level 60 don't get free healthstones from the item
+            // cheat - they must actually carry one.
+            if (bot->GetLevel() < 60 && AI_VALUE2(std::list<Item*>, "inventory items", getName()).empty())
+                return false;
+
+            return true;
+        }
 
         uint32 GetItemId() override
         {
@@ -601,6 +612,11 @@ namespace ai
 #endif
 
             if (bot->getClass() == CLASS_MAGE) // mage should use mana gem, shares cd with dark rune
+                return false;
+
+            // Bots below level 60 don't get free dark runes from the item
+            // cheat - they must actually carry one.
+            if (bot->GetLevel() < 60 && !bot->HasItemCount(20520, 1))
                 return false;
 
             return bot->GetHealth() > 1000;
