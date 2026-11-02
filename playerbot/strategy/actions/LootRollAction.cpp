@@ -36,20 +36,34 @@ bool LootStartRollAction::Execute(Event& event)
 
     LootRollMap lootRolls = AI_VALUE(LootRollMap, "active rolls");
 
-    if (lootRolls.find(creatureGuid) != lootRolls.end())
-        return false;
-
     Loot* loot = sLootMgr.GetLoot(bot, creatureGuid);
     if (!loot)
         return false;
 
-    
+    // The core starts rolls one item at a time, each sending its own announcement
+    // as it is created, so the announcement for the first item arrives before the
+    // later items have a roll at all. This used to return early once the corpse
+    // had any registered roll, which meant every item after the first was never
+    // recorded and the bot silently let those timers expire. Register the slot
+    // this packet is about, then sweep for any others that exist by now.
+    auto known = [&lootRolls](ObjectGuid const& guid, uint32 slot)
+    {
+        auto range = lootRolls.equal_range(guid);
+        for (auto itr = range.first; itr != range.second; ++itr)
+            if (itr->second == slot)
+                return true;
+        return false;
+    };
+
+    if (loot->GetRollForSlot(itemSlot) && !known(creatureGuid, itemSlot))
+        lootRolls.insert({ creatureGuid, itemSlot });
+
 #ifdef MANGOSBOT_TWO
     for (uint8 i = 0; i < MAX_LOOT_ITEMS; i++)
 #else
     for (uint8 i = 0; i < MAX_NR_LOOT_ITEMS; i++)        
 #endif
-        if(loot->GetRollForSlot(i))
+        if (loot->GetRollForSlot(i) && !known(creatureGuid, i))
             lootRolls.insert({ creatureGuid, i });
         
     ActiveRolls::CleanUp(bot,lootRolls);
@@ -249,6 +263,9 @@ bool RollAction::RollOnItemInSlot(RollVote vote, ObjectGuid lootGuid, uint32 slo
         return false;
 
     LootItem* item = loot->GetLootItemInSlot(slot);
+    if (!item)
+        return false;
+
     ItemPrototype const* proto = sItemStorage.LookupEntry<ItemPrototype>(item->itemId);
     if (!proto)
         return false;
@@ -298,9 +315,10 @@ bool AutoLootRollAction::Execute(Event& event)
 {
     LootRollMap lootRolls = AI_VALUE(LootRollMap, "active rolls");
 
-    auto currentRoll = lootRolls.begin();
+    if (lootRolls.empty())           // size() - 1 below would underflow
+        return false;
 
-    currentRoll = std::next(currentRoll, urand(0, lootRolls.size() - 1));
+    auto currentRoll = std::next(lootRolls.begin(), urand(0, lootRolls.size() - 1));
 
     ItemQualifier itemQualifier = GetRollItem(currentRoll->first, currentRoll->second);
 
@@ -314,5 +332,9 @@ bool AutoLootRollAction::Execute(Event& event)
 
 bool AutoLootRollAction::isPossible()
 {
-    return bot->GetGroup() && !AI_VALUE(LootRollMap, "active rolls").empty() && AI_VALUE(uint8, "bag space") < 100;
+    // Deliberately not gated on bag space. A bot with full bags used to stay
+    // silent and let the timer run out; it should still vote - need when the item
+    // is an upgrade, greed or pass otherwise - and the bag cleanup keeps slots
+    // free so a win can actually be stored.
+    return bot->GetGroup() && !AI_VALUE(LootRollMap, "active rolls").empty();
 }
