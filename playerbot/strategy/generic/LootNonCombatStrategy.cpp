@@ -21,6 +21,11 @@ void LootNonCombatStrategy::InitNonCombatTriggers(std::list<TriggerNode*> &trigg
     triggers.push_back(new TriggerNode(
         "often",
         NextAction::array(0, new NextAction("add all loot", 1.0f), NULL)));
+
+    // ahead of looting, so there is room for what is about to be picked up
+    triggers.push_back(new TriggerNode(
+        "often",
+        NextAction::array(0, new NextAction("keep bag space", 1.1f), NULL)));
 }
 
 void GatherStrategy::InitNonCombatTriggers(std::list<TriggerNode*> &triggers)

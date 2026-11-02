@@ -215,6 +215,7 @@ namespace ai
             creators["use random quest item"] = [](PlayerbotAI* ai) { return new UseRandomQuestItemAction(ai); };
             creators["craft random item"] = [](PlayerbotAI* ai) { return new CraftRandomItemAction(ai); };
             creators["smart destroy item"] = [](PlayerbotAI* ai) { return new SmartDestroyItemAction(ai); };
+            creators["keep bag space"] = [](PlayerbotAI* ai) { return new KeepBagSpaceAction(ai); };
             creators["disenchant random item"] = [](PlayerbotAI* ai) { return new DisenchantRandomItemAction(ai); };
             creators["enchant random item"] = [](PlayerbotAI* ai) { return new EnchantRandomItemAction(ai); };
             creators["reset instances"] = [](PlayerbotAI* ai) { return new ResetInstancesAction(ai); };

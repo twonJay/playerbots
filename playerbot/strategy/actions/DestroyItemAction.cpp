@@ -115,6 +115,77 @@ bool SmartDestroyItemAction::Execute(Event& event)
     return false;
 }
 
+uint32 KeepBagSpaceAction::FreeBagSlots(Player* bot)
+{
+    uint32 freeSlots = 0;
+
+    for (uint8 slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END; ++slot)
+        if (!bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot))
+            ++freeSlots;
+
+    for (uint8 bag = INVENTORY_SLOT_BAG_START; bag < INVENTORY_SLOT_BAG_END; ++bag)
+    {
+        const Bag* const pBag = (Bag*)bot->GetItemByPos(INVENTORY_SLOT_BAG_0, bag);
+        if (!pBag)
+            continue;
+
+        ItemPrototype const* proto = pBag->GetProto();
+        // only general containers; quivers and ammo pouches cannot hold loot
+        if (proto && proto->Class == ITEM_CLASS_CONTAINER && proto->SubClass == ITEM_SUBCLASS_CONTAINER)
+            freeSlots += pBag->GetFreeSlots();
+    }
+
+    return freeSlots;
+}
+
+bool KeepBagSpaceAction::isUseful()
+{
+    return FreeBagSlots(bot) < KEEP_FREE_SLOTS;
+}
+
+bool KeepBagSpaceAction::Execute(Event& event)
+{
+    if (FreeBagSlots(bot) >= KEEP_FREE_SLOTS)
+        return false;
+
+    // Collect grey items first: destroying one does not move the others, so the
+    // recorded positions stay valid. Anything the bot was explicitly told to keep
+    // (force item usage) is left alone, and nothing above Poor quality is touched.
+    std::vector<Item*> greys;
+
+    for (uint8 slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END; ++slot)
+        if (Item* item = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot))
+            greys.push_back(item);
+
+    for (uint8 bag = INVENTORY_SLOT_BAG_START; bag < INVENTORY_SLOT_BAG_END; ++bag)
+        if (Bag* pBag = (Bag*)bot->GetItemByPos(INVENTORY_SLOT_BAG_0, bag))
+            for (uint32 i = 0; i < pBag->GetBagSize(); ++i)
+                if (Item* item = pBag->GetItemByPos(i))
+                    greys.push_back(item);
+
+    bool destroyedAny = false;
+    for (Item* item : greys)
+    {
+        ItemPrototype const* proto = item->GetProto();
+        if (!proto || proto->Quality != ITEM_QUALITY_POOR)
+            continue;
+
+        if (HAS_AI_VALUE2("force item usage", proto->ItemId))
+            continue;
+
+        sLog.outDetail("%s destroyed %s to keep bag space free",
+                       bot->GetName(), ai->GetChatHelper()->formatItem(proto).c_str());
+
+        bot->DestroyItem(item->GetBagSlot(), item->GetSlot(), true);
+        destroyedAny = true;
+
+        if (FreeBagSlots(bot) >= KEEP_FREE_SLOTS)
+            break;
+    }
+
+    return destroyedAny;
+}
+
 bool DestroyAllGrayItemsAction::Execute(Event& event)
 {
     Player* requester = event.getOwner() ? event.getOwner() : GetMaster();

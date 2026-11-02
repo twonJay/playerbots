@@ -45,6 +45,32 @@ namespace ai
 #endif
     };
 
+    // Keeps a couple of bag slots free at all times by destroying grey items, so a
+    // bot can always store what it wins or loots. Unlike SmartDestroyItemAction this
+    // runs with a real player master too - that is exactly when a bot cannot wander
+    // off to a vendor - and it will only ever destroy Poor quality items.
+    class KeepBagSpaceAction : public DestroyItemAction
+    {
+    public:
+        KeepBagSpaceAction(PlayerbotAI* ai) : DestroyItemAction(ai, "keep bag space") {}
+        virtual bool Execute(Event& event) override;
+        virtual bool isUseful() override;
+        virtual bool isUsefulWhenStunned() override { return true; }
+
+        static uint32 FreeBagSlots(Player* bot);
+        static const uint32 KEEP_FREE_SLOTS = 2;
+
+#ifdef GenerateBotHelp
+        virtual std::string GetHelpName() { return "keep bag space"; } //Must equal iternal name
+        virtual std::string GetHelpDescription()
+        {
+            return "This action destroys grey items when the bot has fewer than two free bag slots.\n";
+        }
+        virtual std::vector<std::string> GetUsedActions() { return {}; }
+        virtual std::vector<std::string> GetUsedValues() { return { "force item usage" }; }
+#endif
+    };
+
     class DestroyAllGrayItemsAction : public DestroyItemAction
     {
     public:
